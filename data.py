@@ -6,7 +6,9 @@ from tqdm import tqdm
 from typing import List
 import torch
 
-def waveformSet(Dataset):
+EPS = 1e-12
+
+class waveformSet(Dataset):
 
 
     def __init__(self,audioFiles: List[str],audioROIs: List[str],maxSegs: int =1000,seed=1738):
@@ -14,20 +16,46 @@ def waveformSet(Dataset):
 
         self.chunks = []
         totalFiles = len(audioFiles)
-        order = np.random.choice(totalFiles,maxSegs,replace=False,seed=seed)
-        for ii in tqdm(order,desc='Pre-processing audio'):
-            aud = audioFiles[ii]
-            onoffs = audioROIs[ii]
+        generator = np.random.default_rng(seed=seed)
+        order = generator.choice(totalFiles,totalFiles,replace=False)
+
+        def getChunks(onset,offset,currentCount):
+            """
+            gets all chunks for current onsets and offsets. 
+            raises a flag if we've hit our maximum number of segments
+            """
+            tmpChunks = []
+            for on,off in zip(onset,offset):
+                    
+                if currentCount >= maxSegs:
+                    return tmpChunks,currentCount,True
+                segOn,segOff = np.searchsorted(audio_times,on),np.searchsorted(audio_times,off)
+
+                tmpChunks += self._separate_into_chunks(audio[segOn:segOff])
+                currentCount += 1
+            return tmpChunks,currentCount,False
+        
+        totalSegs = 0
+
+        for ii,ind in tqdm(enumerate(order),desc='Pre-processing audio'):
+            aud = audioFiles[ind]
+            onoffs = audioROIs[ind]
+            print(onoffs)
+
             fs,audio = wavfile.read(aud)
             if ii == 0:
                 self.fs = fs
             audio_times = np.linspace(0,len(audio)/fs,len(audio))
-            onset,offset = np.loadtxt(onoffs)
-            for on,off in zip(onset,offset):
-                segOn,segOff = np.searchsorted(audio_times,on),np.searchsorted(audio_times,off)
+            #print(np.loadtxt(onoffs))
+            #onset,offset = np.loadtxt(onoffs)
+            onset,offset = np.loadtxt(onoffs,delimiter=' ',unpack=True)
+            chunks,totalSegs,flag = getChunks(onset,offset,totalSegs)
+            self.chunks += chunks
+            if flag:
+                print("max number of segments reached!")
+                break
 
-                self.chunks += self._separate_into_chunks(audio[segOn:segOff])
-
+        print("Getting positive pair indices")  
         self.eligible_inds = self._crosscorr_chunks()
 
     def __len__(self):
@@ -47,11 +75,15 @@ def waveformSet(Dataset):
     def _separate_into_chunks(self,segment,chunklen_s=0.01):
         
         currTimes = np.arange(0,len(segment)/self.fs,1/self.fs)
+        chunkLen = int(np.round(self.fs * chunklen_s))
         segOns = np.arange(0,len(segment)/self.fs,chunklen_s)
         newChunks = []
+        #print(chunkLen)
         for on in segOns:
             onInd,offInd = np.searchsorted(currTimes,on),np.searchsorted(currTimes,on+chunklen_s)
-            newChunks.append(segment[onInd:offInd])
+            
+            if offInd - onInd >= chunkLen:
+                newChunks.append(segment[onInd:offInd][:chunkLen])
           
         return newChunks
     
@@ -62,7 +94,7 @@ def waveformSet(Dataset):
         """
 
         allInds = []
-        for ii,c1 in enumerate(self.chunks):
+        for ii,c1 in tqdm(enumerate(self.chunks),desc='being inefficient'):
             chunkCorrs = []
             centered1 = c1 - np.nanmean(c1)
             sd1 = np.nanstd(centered1)
@@ -70,13 +102,14 @@ def waveformSet(Dataset):
                 if ii != jj:
                     centered2 = c2 - np.nanmean(c2)
                     sd2 = np.nanstd(centered2)
-                    chunkCorrs.append((centered1.T @ centered2)/(sd1  * sd2 * len(centered2)))
+                    chunkCorrs.append((centered1.T @ centered2)/(EPS+ sd1  * sd2 * len(centered2)))
                 else:
                     chunkCorrs.append(0)
 
-            assert np.all(chunkCorrs <= 1) and np.all(chunkCorrs >= -1), print("corrs outside of valid range")
+            
             
             chunkCorrs = np.array(chunkCorrs)
+            assert np.all(chunkCorrs <= 1) and np.all(chunkCorrs >= -1), print("corrs outside of valid range")
             corrsSorted = np.sort(chunkCorrs,axis=None)
             cutoff = corrsSorted[int(round(0.9*len(chunkCorrs)))]
             allInds.append( chunkCorrs >= cutoff)
