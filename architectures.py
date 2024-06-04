@@ -16,14 +16,14 @@ import torch.nn.functional as F
 
 def conv1d(in_channels,out_channels,kernel_size,stride=1,dilation=1):
 
-    return nn.conv1d(
+    return nn.Conv1d(
         in_channels,
         out_channels,
         kernel_size=kernel_size,
         stride=stride,
         dilation=dilation,
         bias=False,
-        group=1,
+        groups=1,
         padding=dilation
     )
 
@@ -45,7 +45,8 @@ class Encoder(nn.Module):
 
         self.encode_dim = encode_dim
 
-        encode_dim /= 2
+        encode_dim //= 2
+        
 
         self.strided_encoder = nn.Sequential(
             conv1d(in_channels, # downsample to len 87
@@ -53,31 +54,31 @@ class Encoder(nn.Module):
                    kernel_size=kernels[0],
                    stride=strides[0],
                    dilation=1),
-                   norm_layer,
-            conv1d(in_channels, # downsample to len 21
+                   norm_layer(encode_dim),
+            conv1d(encode_dim, # downsample to len 21
                    out_channels=encode_dim,
                    kernel_size=kernels[1],
                    stride=strides[1],
                    dilation=1),
-                   norm_layer,
-            conv1d(in_channels, # downsample to len 10
+                   norm_layer(encode_dim),
+            conv1d(encode_dim, # downsample to len 10
                    out_channels=encode_dim,
                    kernel_size=kernels[2],
                    stride=strides[2],
                    dilation=1),
-                   norm_layer,
-            conv1d(in_channels, # downsample to len 4
+                   norm_layer(encode_dim),
+            conv1d(encode_dim, # downsample to len 4
                    out_channels=encode_dim,
                    kernel_size=kernels[3],
                    stride=strides[3],
                    dilation=1),
-                   norm_layer,
-            conv1d(in_channels, #downsample to len 1
+                   norm_layer(encode_dim),
+            conv1d(encode_dim, #downsample to len 1
                    out_channels=encode_dim,
                    kernel_size=kernels[4],
                    stride=strides[4],
                    dilation=1),
-                   norm_layer,
+                   norm_layer(encode_dim)
             )
 
         self.dilated_encoder=nn.Sequential(
@@ -86,31 +87,31 @@ class Encoder(nn.Module):
                    kernel_size=kernels[0],
                    stride=3,
                    dilation=dilations[0]),
-                   norm_layer,
-            conv1d(in_channels, # downsample to len 21
+                   norm_layer(encode_dim),
+            conv1d(encode_dim, # downsample to len 21
                    out_channels=encode_dim,
                    kernel_size=kernels[1],
                    stride=3,
                    dilation=dilations[1]),
-                   norm_layer,
-            conv1d(in_channels, # downsample to len 10
+                   norm_layer(encode_dim),
+            conv1d(encode_dim, # downsample to len 10
                    out_channels=encode_dim,
                    kernel_size=kernels[2],
                    stride=2,
                    dilation=dilations[2]),
-                   norm_layer,
-            conv1d(in_channels, # downsample to len 4
+                   norm_layer(encode_dim),
+            conv1d(encode_dim, # downsample to len 4
                    out_channels=encode_dim,
                    kernel_size=kernels[3],
                    stride=2,
                    dilation=dilations[3]),
-                   norm_layer,
-            conv1d(in_channels, #downsample to len 1
+                   norm_layer(encode_dim),
+            conv1d(encode_dim, #downsample to len 1
                    out_channels=encode_dim,
                    kernel_size=kernels[4],
                    stride=3,
                    dilation=dilations[4]),
-                   norm_layer,
+                   norm_layer(encode_dim)
             )
         
         def _weights_init(m):
@@ -124,11 +125,11 @@ class Encoder(nn.Module):
 
         self.apply(_weights_init)
 
-        def forward(self,x):
+    def forward(self,x):
 
-            dilatedRep,stridedRep = self.dilated_encoder(x),self.strided_encoder(x)
-            rep = torch.cat([dilatedRep,stridedRep],dim=-1)
-            return rep
+        dilatedRep,stridedRep = self.dilated_encoder(x),self.strided_encoder(x)
+        rep = torch.cat([dilatedRep.squeeze(-1),stridedRep.squeeze(-1)],dim=-1)
+        return rep
         
 def Projector(sizes):
 
@@ -143,17 +144,20 @@ def Projector(sizes):
 
 class VicRegWaves(nn.Module):
 
-    def __init__(self,args):
+    def __init__(self,args,dilations,strides,kernels,encode_dim,sizes,sim_coeff=1,std_coeff=1,cov_coeff=1):
         super().__init__()
         self.args = args 
         self.encoder = Encoder(in_channels=1,
-                               dilations=args.dilations,
-                               strides=args.strides,
-                               kernels=args.kernels,
-                               encode_dim=args.encode_dim,
-                               norm_lays=nn.BatchNorm1d)
-        self.projector = Projector(args.sizes)
-        self.latent_dim=args.encode_dim
+                               dilations=dilations,
+                               strides=strides,
+                               kernels=kernels,
+                               encode_dim=encode_dim,
+                               norm_layer=nn.BatchNorm1d)
+        self.projector = Projector(sizes)
+        self.latent_dim=encode_dim
+        self.sim_coeff = sim_coeff
+        self.std_coeff = std_coeff
+        self.cov_coeff = cov_coeff
 
     def forward(self,x1,x2):
 
@@ -177,9 +181,9 @@ class VicRegWaves(nn.Module):
         cov_loss = off_diagonal(cov_z2).pow_(2).sum().div(self.latent_dim) + \
             off_diagonal(cov_z2hat).pow_(2).sum().div(self.latent_dim)
 
-        loss = (self.args.sim_coeff*repr_loss 
-                + self.args.std_coeff * std_loss 
-                + self.args.cov_coeff * cov_loss)
+        loss = (self.sim_coeff*repr_loss 
+                + self.std_coeff * std_loss 
+                + self.cov_coeff * cov_loss)
         
         return loss 
     
