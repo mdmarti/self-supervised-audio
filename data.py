@@ -40,7 +40,7 @@ class waveformSet(Dataset):
         for ii,ind in tqdm(enumerate(order),desc='Pre-processing audio'):
             aud = audioFiles[ind]
             onoffs = audioROIs[ind]
-            print(onoffs)
+            #print(onoffs)
 
             fs,audio = wavfile.read(aud)
             if ii == 0:
@@ -92,27 +92,46 @@ class waveformSet(Dataset):
         this will be VERY inefficient! after this works, see if you can vectorize
         -- maybe can vectorize based on how many chunks we have?
         """
-
         allInds = []
-        for ii,c1 in tqdm(enumerate(self.chunks),desc='being inefficient'):
-            chunkCorrs = []
-            centered1 = c1 - np.nanmean(c1)
-            sd1 = np.nanstd(centered1)
-            for jj,c2 in enumerate(self.chunks):
-                if ii != jj:
-                    centered2 = c2 - np.nanmean(c2)
-                    sd2 = np.nanstd(centered2)
-                    chunkCorrs.append((centered1.T @ centered2)/(EPS+ sd1  * sd2 * len(centered2)))
-                else:
-                    chunkCorrs.append(0)
+        if len(self.chunks) >= 10000:
 
             
-            
-            chunkCorrs = np.array(chunkCorrs)
-            assert np.all(chunkCorrs <= 1) and np.all(chunkCorrs >= -1), print("corrs outside of valid range")
-            corrsSorted = np.sort(chunkCorrs,axis=None)
-            cutoff = corrsSorted[int(round(0.9*len(chunkCorrs)))]
-            allInds.append( chunkCorrs >= cutoff)
+            for ii,c1 in tqdm(enumerate(self.chunks),desc='being inefficient'):
+                chunkCorrs = []
+                centered1 = c1 - np.nanmean(c1)
+                sd1 = np.nanstd(centered1)
+                for jj,c2 in enumerate(self.chunks):
+                    if ii != jj:
+                        centered2 = c2 - np.nanmean(c2)
+                        sd2 = np.nanstd(centered2)
+                        chunkCorrs.append((centered1.T @ centered2)/(EPS+ sd1  * sd2 * len(centered2)))
+                    else:
+                        chunkCorrs.append(-1)
+
+                
+                
+                chunkCorrs = np.array(chunkCorrs)
+                assert np.all(chunkCorrs <= 1) and np.all(chunkCorrs >= -1), print("corrs outside of valid range")
+                corrsSorted = np.sort(chunkCorrs,axis=None)
+                cutoff = corrsSorted[int(round(0.9*len(chunkCorrs)))]
+                allInds.append( chunkCorrs >= cutoff)
+
+        else:
+            print("being efficient")
+
+            tmpChunks = np.array(self.chunks)
+            #tmpChunks += EPS * np.random.randn(*tmpChunks.shape) # for numerical stability
+            corrs = np.corrcoef(tmpChunks)
+            np.fill_diagonal(corrs,-1)
+            corrs = np.nan_to_num(corrs,-1) # replace nans with lowest val -- need better fix for periods of pure silence (sd = 0)
+            for row in tqdm(corrs,desc='Finding valid inds'):
+                assert np.all(row <= 1) and np.all(row >= -1), print(f"corrs outside of valid range: {row}")
+                corrsSorted = np.sort(row,axis=None)
+                cutoff = corrsSorted[int(round(0.9*len(row)))]
+                allInds.append( row >= cutoff)
+
+
+
         
         return allInds
                 
