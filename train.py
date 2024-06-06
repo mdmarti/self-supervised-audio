@@ -28,9 +28,9 @@ def train(model,loaders,lr,nTrain,saveFreq,testFreq,id,save_dir):
             scaler.update()
             if scaler.get_scale() >= scaleInit:
                 scheduler.step()
-                scaleInit = scalar.get_scale()
+                scaleInit = scaler.get_scale()
             else:
-                scaleInit = scalar.get_scale()
+                scaleInit = scaler.get_scale()
 
             if (step % 50) == 0:
 
