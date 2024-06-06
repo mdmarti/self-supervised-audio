@@ -66,7 +66,7 @@ class waveformSet(Dataset):
 
         audioSample = self.chunks[index]
         validInds = self.eligible_inds[index]
-        ind2 = np.random.choice(np.argwhere(validInds==1).squeeze(),1)
+        ind2 = np.random.choice(np.argwhere(validInds==1).squeeze(),1)[0]
         sample2 = self.chunks[ind2]
 
         return (torch.from_numpy(audioSample).type(torch.FloatTensor),

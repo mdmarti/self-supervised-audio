@@ -163,23 +163,24 @@ class VicRegWaves(nn.Module):
 
         z1 = self.encoder(x1)
         z2 = self.encoder(x2)
-        z2Hat = self.projector(z1)
+        p1 = self.projector(z1)
+        p2 = self.projector(z2)
 
-        repr_loss = F.mse_loss(z2Hat,z2)
+        repr_loss = F.mse_loss(p1,p2)
         
-        centeredZ2 = z2 - z2.mean(dim=0)
-        centeredZ2hat = z1 - z1.mean(dim=0)
+        centeredP2 = p2 - p2.mean(dim=0)
+        centeredP1 = p1 - p1.mean(dim=0)
 
-        std_z2 = torch.sqrt(centeredZ2.var(dim=0) + 1e-4)
-        std_z2hat = torch.sqrt(centeredZ2hat.var(dim=0) + 1e-4)
+        std_p2 = torch.sqrt(centeredP2.var(dim=0) + 1e-4)
+        std_p1 = torch.sqrt(centeredP1.var(dim=0) + 1e-4)
 
-        std_loss = torch.mean(F.relu(1 - std_z2))/2 + torch.mean(F.relu(1-std_z2hat))/2
+        std_loss = torch.mean(F.relu(1 - std_p2))/2 + torch.mean(F.relu(1-std_p1))/2
         
-        cov_z2 = centeredZ2.T @ centeredZ2 / centeredZ2.shape[0]
-        cov_z2hat = centeredZ2hat.T @ centeredZ2hat / centeredZ2hat.shape[0]
+        cov_p2 = centeredP2.T @ centeredP2 / centeredP2.shape[0]
+        cov_p1 = centeredP1.T @ centeredP1 / centeredP1.shape[0]
         
-        cov_loss = off_diagonal(cov_z2).pow_(2).sum().div(self.latent_dim) + \
-            off_diagonal(cov_z2hat).pow_(2).sum().div(self.latent_dim)
+        cov_loss = off_diagonal(cov_p2).pow_(2).sum().div(self.latent_dim) + \
+            off_diagonal(cov_p1).pow_(2).sum().div(self.latent_dim)
 
         loss = (self.sim_coeff*repr_loss 
                 + self.std_coeff * std_loss 
