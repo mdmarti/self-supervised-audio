@@ -1,4 +1,4 @@
-from torch.optim import SGD, Adam
+from torch.optim import SGD, Adam, lr_scheduler
 import torch
 import tensorboard,tensorboardX
 from tqdm import tqdm
@@ -11,7 +11,9 @@ def train(model,loaders,lr,nTrain,saveFreq,testFreq,id,save_dir):
     gpu = torch.device('cuda')
     model.cuda(gpu)
     optimizer = Adam(model.parameters(),lr)
+    scheduler = lr_scheduler.ExponentialLR(optimizer=optimizer,gamma=0.99)
     scaler = torch.cuda.amp.GradScaler()
+    scaleInit = scaler.get_scale()
     for epoch in tqdm(range(nTrain),desc='training model'):
         
         for step,(x1,x2) in enumerate(loaders['train'],start=epoch*len(loaders['train'])):
@@ -24,6 +26,11 @@ def train(model,loaders,lr,nTrain,saveFreq,testFreq,id,save_dir):
             scaler.scale(loss).backward()
             scaler.step(optimizer)
             scaler.update()
+            if scaler.get_scale() >= scaleInit:
+                scheduler.step()
+                scaleInit = scalar.get_scale()
+            else:
+                scaleInit = scalar.get_scale()
 
             if (step % 50) == 0:
 
