@@ -43,6 +43,8 @@ class waveformSet(Dataset):
             #print(onoffs)
 
             fs,audio = wavfile.read(aud)
+            if np.amax(audio) > 1:
+                audio = audio/32768 # if audio is coded with ints, divide by max int value to convert to float
             if ii == 0:
                 self.fs = fs
             audio_times = np.linspace(0,len(audio)/fs,len(audio))
@@ -93,7 +95,7 @@ class waveformSet(Dataset):
         -- maybe can vectorize based on how many chunks we have?
         """
         allInds = []
-        if len(self.chunks) >= 10000:
+        if len(self.chunks) >= 20000:
 
             
             for ii,c1 in tqdm(enumerate(self.chunks),desc='being inefficient'):
