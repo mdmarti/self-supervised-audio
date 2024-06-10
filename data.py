@@ -6,15 +6,17 @@ from tqdm import tqdm
 from typing import List
 import torch
 
-EPS = 1e-12
+EPS = 1e-6
 
 class waveformSet(Dataset):
 
 
-    def __init__(self,audioFiles: List[str],audioROIs: List[str],maxSegs: int =1000,seed=1738):
+    def __init__(self,audioFiles: List[str],audioROIs: List[str],overlap=0.5,maxSegs: int =1000,seg_lim=20000,seed=1738):
 
 
         self.chunks = []
+        self.overlap = overlap
+        self.seg_lim=seg_lim
         totalFiles = len(audioFiles)
         generator = np.random.default_rng(seed=seed)
         order = generator.choice(totalFiles,totalFiles,replace=False)
@@ -78,7 +80,7 @@ class waveformSet(Dataset):
         
         currTimes = np.arange(0,len(segment)/self.fs,1/self.fs)
         chunkLen = int(np.round(self.fs * chunklen_s))
-        segOns = np.arange(0,len(segment)/self.fs,chunklen_s)
+        segOns = np.arange(0,len(segment)/self.fs,chunklen_s*(1-self.overlap))
         newChunks = []
         #print(chunkLen)
         for on in segOns:
@@ -95,13 +97,26 @@ class waveformSet(Dataset):
         -- maybe can vectorize based on how many chunks we have?
         """
         allInds = []
-        if len(self.chunks) >= 20000:
+        if len(self.chunks) >= self.seg_lim:
 
-            
-            for ii,c1 in tqdm(enumerate(self.chunks),desc='being inefficient'):
+            tmpChunks = np.array(self.chunks)
+            tmpChunks += EPS * np.random.normal(size=tmpChunks.shape)
+            sdFull = np.nanstd(tmpChunks,axis=-1)
+            scale = tmpChunks.shape[-1]
+            centeredFull = tmpChunks - np.nanmean(tmpChunks,axis=-1,keepdims=True)
+            for ii,c1 in tqdm(enumerate(centeredFull),desc=f'being inefficient: more thank {self.seg_lim} segs'):
                 chunkCorrs = []
-                centered1 = c1 - np.nanmean(c1)
-                sd1 = np.nanstd(centered1)
+                #centered1 = c1 - np.nanmean(c1)
+                sd1 = sdFull[ii]#np.nanstd(centered1)
+                cov = centeredFull @ c1 /scale
+                chunkCorrs = cov/(sd1 * sdFull)
+                #print(chunkCorrs.shape)
+                chunkCorrs[ii] = -1
+                assert np.all(chunkCorrs <= 1) and np.all(chunkCorrs >= -1), print(f"corrs outside of valid range: {np.amin(chunkCorrs),np.amax(chunkCorrs)}")
+                corrsSorted = np.sort(chunkCorrs,axis=None)
+                cutoff = corrsSorted[int(round(0.9*len(chunkCorrs)))]
+                allInds.append( chunkCorrs >= cutoff)
+                """
                 for jj,c2 in enumerate(self.chunks):
                     if ii != jj:
                         centered2 = c2 - np.nanmean(c2)
@@ -117,11 +132,12 @@ class waveformSet(Dataset):
                 corrsSorted = np.sort(chunkCorrs,axis=None)
                 cutoff = corrsSorted[int(round(0.9*len(chunkCorrs)))]
                 allInds.append( chunkCorrs >= cutoff)
-
+                """
         else:
             print("being efficient")
 
             tmpChunks = np.array(self.chunks)
+            tmpChunks += EPS * np.random.normal(size=tmpChunks.shape)
             #tmpChunks += EPS * np.random.randn(*tmpChunks.shape) # for numerical stability
             corrs = np.corrcoef(tmpChunks)
             np.fill_diagonal(corrs,-1)
